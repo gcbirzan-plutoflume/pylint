@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import argparse
-import multiprocessing
 import os
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from pickle import PickleError
 
 import dill
 import pytest
@@ -109,7 +111,7 @@ class ParallelTestChecker(BaseRawFileChecker):
         for _ in self.data[1::2]:  # Work on pairs of files, see class docstring.
             self.add_message("R9999", args=("From process_module, two files seen.",))
 
-    def get_map_data(self):
+    def get_map_data(self) -> list[str]:
         return self.data
 
     def reduce_map_data(self, linter: PyLinter, data: list[list[str]]) -> None:
@@ -160,10 +162,10 @@ class ThirdParallelTestChecker(ParallelTestChecker):
 class TestCheckParallelFramework:
     """Tests the check_parallel() function's framework."""
 
-    def setup_class(self):
+    def setup_class(self) -> None:
         self._prev_global_linter = pylint.lint.parallel._worker_linter
 
-    def teardown_class(self):
+    def teardown_class(self) -> None:
         pylint.lint.parallel._worker_linter = self._prev_global_linter
 
     def test_worker_initialize(self) -> None:
@@ -181,15 +183,15 @@ class TestCheckParallelFramework:
         """
         linter = PyLinter(reporter=Reporter())
         linter.attribute = argparse.ArgumentParser()  # type: ignore[attr-defined]
-        with multiprocessing.Pool(
-            2, initializer=worker_initialize, initargs=[dill.dumps(linter)]
-        ) as pool:
-            pool.imap_unordered(print, [1, 2])
+        with ProcessPoolExecutor(
+            max_workers=2, initializer=worker_initialize, initargs=(dill.dumps(linter),)
+        ) as executor:
+            executor.map(print, [1, 2])
 
     def test_worker_check_single_file_uninitialised(self) -> None:
         pylint.lint.parallel._worker_linter = None
         with pytest.raises(  # Objects that do not match the linter interface will fail
-            Exception, match="Worker linter not yet initialised"
+            RuntimeError, match="Worker linter not yet initialised"
         ):
             worker_check_single_file(_gen_file_data())
 
@@ -230,6 +232,28 @@ class TestCheckParallelFramework:
         assert stats.refactor == 0
         assert stats.statement == 18
         assert stats.warning == 0
+
+    def test_linter_with_unpickleable_plugins_is_pickleable(self) -> None:
+        """The linter needs to be pickle-able in order to be passed between workers"""
+        linter = PyLinter(reporter=Reporter())
+        # We load an extension that we know is not pickle-safe
+        linter.load_plugin_modules(["pylint.extensions.overlapping_exceptions"])
+        try:
+            dill.dumps(linter)
+            raise AssertionError(
+                "Plugins loaded were pickle-safe! This test needs altering"
+            )
+        except (KeyError, TypeError, PickleError, NotImplementedError):
+            pass
+
+        # And expect this call to make it pickle-able
+        linter.load_plugin_configuration()
+        try:
+            dill.dumps(linter)
+        except KeyError as exc:
+            raise AssertionError(
+                "Cannot pickle linter when using non-pickleable plugin"
+            ) from exc
 
     def test_worker_check_sequential_checker(self) -> None:
         """Same as test_worker_check_single_file_no_checkers with SequentialTestChecker."""
@@ -411,7 +435,9 @@ class TestCheckParallel:
             (10, 2, 3),
         ],
     )
-    def test_compare_workers_to_single_proc(self, num_files, num_jobs, num_checkers):
+    def test_compare_workers_to_single_proc(
+        self, num_files: int, num_jobs: int, num_checkers: int
+    ) -> None:
         """Compares the 3 key parameters for check_parallel() produces the same results.
 
         The intent here is to ensure that the check_parallel() operates on each file,
@@ -508,7 +534,7 @@ class TestCheckParallel:
             (10, 2, 3),
         ],
     )
-    def test_map_reduce(self, num_files, num_jobs, num_checkers):
+    def test_map_reduce(self, num_files: int, num_jobs: int, num_checkers: int) -> None:
         """Compares the 3 key parameters for check_parallel() produces the same results.
 
         The intent here is to validate the reduce step: no stats should be lost.
@@ -552,3 +578,27 @@ class TestCheckParallel:
         assert str(stats_single_proc.by_msg) == str(
             stats_check_parallel.by_msg
         ), "Single-proc and check_parallel() should return the same thing"
+
+    @pytest.mark.timeout(5)
+    def test_no_deadlock_due_to_initializer_error(self) -> None:
+        """Tests that an error in the initializer for the parallel jobs doesn't
+        lead to a deadlock.
+        """
+        linter = PyLinter(reporter=Reporter())
+
+        linter.register_checker(SequentialTestChecker(linter))
+
+        # Create a dummy file, the actual contents of which will be ignored by the
+        # register test checkers, but it will trigger at least a single-job to be run.
+        single_file_container = _gen_file_datas(count=1)
+
+        # The error in the initializer should trigger a BrokenProcessPool exception
+        with pytest.raises(BrokenProcessPool):
+            check_parallel(
+                linter,
+                jobs=1,
+                files=iter(single_file_container),
+                # This will trigger an exception in the initializer for the parallel jobs
+                # because arguments has to be an Iterable.
+                arguments=1,  # type: ignore[arg-type]
+            )

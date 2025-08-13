@@ -44,6 +44,7 @@ class MessageData(NamedTuple):
     checker_module_name: str
     checker_module_path: str
     shared: bool = False
+    default_enabled: bool = True
 
 
 MessagesDict = Dict[str, List[MessageData]]
@@ -194,6 +195,7 @@ def _get_all_messages(
             checker_module.__name__,
             checker_module.__file__,
             message.shared,
+            message.default_enabled,
         )
         msg_type = MSG_TYPES_DOC[message.msgid[0]]
         messages_dict[msg_type].append(message_data)
@@ -271,7 +273,15 @@ def _generate_single_message_body(message: MessageData) -> str:
 **Description:**
 
 *{message.definition.description}*
+"""
+    if not message.default_enabled:
+        body += f"""
+.. caution::
+  This message is disabled by default. To enable it, add ``{message.name}`` to the ``enable`` option.
 
+"""
+
+    body += f"""
 {message.bad_code}
 {message.good_code}
 {message.details}
@@ -280,8 +290,8 @@ def _generate_single_message_body(message: MessageData) -> str:
     if message.checker_module_name.startswith("pylint.extensions."):
         body += f"""
 .. note::
-  This message is emitted by the optional :ref:`'{message.checker}'<{message.checker_module_name}>` checker which requires the ``{message.checker_module_name}``
-  plugin to be loaded.
+  This message is emitted by the optional :ref:`'{message.checker}'<{message.checker_module_name}>`
+   checker which requires the ``{message.checker_module_name}`` plugin to be loaded.
 
 """
     return body
@@ -404,8 +414,8 @@ def _write_redirect_old_page(
     )
     content = f""".. _{old_name[0]}:
 
-{get_rst_title("/".join(old_name), "=")}
-"{old_name[0]} has been renamed. The new message can be found at:
+{get_rst_title(" / ".join(old_name), "=")}
+'{old_name[0]}' has been renamed. The new message can be found at:
 
 .. toctree::
    :maxdepth: 2
