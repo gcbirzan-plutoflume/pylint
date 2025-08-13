@@ -72,17 +72,25 @@ def _config_initialization(
     # the configuration file
     parsed_args_list = linter._parse_command_line_configuration(args_list)
 
+    # Remove the positional arguments separator from the list of arguments if it exists
+    try:
+        parsed_args_list.remove("--")
+    except ValueError:
+        pass
+
     # Check if there are any options that we do not recognize
     unrecognized_options: list[str] = []
     for opt in parsed_args_list:
         if opt.startswith("--"):
-            if len(opt) > 2:
-                unrecognized_options.append(opt[2:])
+            unrecognized_options.append(opt[2:])
         elif opt.startswith("-"):
             unrecognized_options.append(opt[1:])
     if unrecognized_options:
         msg = ", ".join(unrecognized_options)
-        linter._arg_parser.error(f"Unrecognized option found: {msg}")
+        try:
+            linter._arg_parser.error(f"Unrecognized option found: {msg}")
+        except SystemExit:
+            sys.exit(32)
 
     # Now that config file and command line options have been loaded
     # with all disables, it is safe to emit messages

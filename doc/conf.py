@@ -288,12 +288,16 @@ man_pages = [
 
 # pylint: disable-next=consider-using-namedtuple-or-dataclass
 intersphinx_mapping = {
-    "astroid": ("https://pylint.pycqa.org/projects/astroid/en/latest/", None),
+    "astroid": ("https://pylint.readthedocs.io/projects/astroid/en/latest/", None),
     "python": ("https://docs.python.org/3", None),
 }
 
 # Prevent label issues due to colliding section names
 # through including multiple documents
 autosectionlabel_prefix_document = True
+
+# Permit duplicated titles in the resulting document.
+# See https://github.com/PyCQA/pylint/issues/7362#issuecomment-1256932866
+autosectionlabel_maxdepth = 2
 
 linkcheck_ignore = ["https://github.com/PyCQA/pylint/blob/main/pylint/extensions/.*"]

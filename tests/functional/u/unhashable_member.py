@@ -21,3 +21,10 @@ class Unhashable:
 {[1, 2, 3]}  # [unhashable-member]
 {"tomato": "tomahto"}
 {dict: {}}
+{lambda x: x: "tomato"}  # pylint: disable=unnecessary-lambda
+
+
+class FromDict(dict):
+    ...
+
+{FromDict: 1}
